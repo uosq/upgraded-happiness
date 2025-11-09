@@ -62,7 +62,6 @@ end
 
 local function OnDraw()
 	--- Reset our state table
-	state.accuracy = nil
 	state.angle = nil
 	state.path = nil
 	state.target = nil
@@ -194,7 +193,6 @@ local function OnDraw()
 		return
 	end
 
-	--state.accuracy = accuracy
 	state.target = bestEnt
 	state.path = path
 	state.angle = angle
