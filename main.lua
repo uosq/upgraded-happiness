@@ -10,7 +10,7 @@ local config = {
 	max_distance = 3000,
 	min_accuracy = 5,
 	max_accuracy = 15,
-	path_time = 100.0,
+	path_time = 2.0,
 }
 
 --local SimulatePlayer = require("playersim")
@@ -36,7 +36,7 @@ local state = {
 	--accuracy = nil, --- ()
 	storedpath = {removetime = 0.0, path = nil},
 	charge = 0,
-	charges = false
+	charges = false,
 }
 
 ---@param localPos Vector3
@@ -56,6 +56,25 @@ local function ProcessClass(localPos, className, enemyTeam, outTable)
 		and (localPos - entity:GetAbsOrigin()):Length() <= config.max_distance then
 			--print(string.format("Is alive: %s, Health: %d", entity:IsAlive(), entity:GetHealth()))
 			outTable[#outTable+1] = entity
+		end
+	end
+end
+
+---@param tbl Vector3[]
+local function DrawPath(tbl)
+	if #tbl >= 2 then
+		local prev = client.WorldToScreen(tbl[1])
+		if prev then
+			draw.Color(255, 255, 255, 255)
+			for i = 2, #tbl do
+				local curr = client.WorldToScreen(tbl[i])
+				if curr and prev then
+					draw.Line(prev[1], prev[2], curr[1], curr[2])
+					prev = curr
+				else
+					break
+				end
+			end
 		end
 	end
 end
@@ -84,21 +103,8 @@ local function OnDraw()
 
 	--- TODO: Use a polygon instead!
 	local storedpath = state.storedpath.path
-	if storedpath and #storedpath >= 2 then
-		local prev = client.WorldToScreen(storedpath[1])
-		if prev then
-			draw.Color(255, 255, 255, 255)
-
-			for i = 2, #storedpath do
-				local curr = client.WorldToScreen(storedpath[i])
-				if curr and prev then
-					draw.Line(prev[1], prev[2], curr[1], curr[2])
-					prev = curr
-				else
-					break
-				end
-			end
-		end
+	if storedpath then
+		DrawPath(storedpath)
 	end
 
 	if input.IsButtonDown(config.key) == false then

@@ -44,6 +44,10 @@ for i = 1, MAX_CLIP_PLANES do
 	clip_planes[i] = Vector3()
 end
 
+--- We store the player samples here
+local samples = {}
+local MAX_SAMPELS = 64
+
 ---@param text string
 local function DebugPrint(text, ...)
 	client.ChatPrintf(string.format(text, ...))
