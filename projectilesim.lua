@@ -53,11 +53,11 @@ end
 ---@param time_seconds number
 ---@param localTeam integer
 ---@param charge number
----@return Vector3[], boolean?
+---@return Vector3[], boolean?, number[]
 local function SimulateProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	local projectile = GetPhysicsProjectile(info)
 	if projectile == nil then
-		return {}
+		return {}, nil, {}
 	end
 
 	projectile:Wake()
@@ -75,6 +75,8 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 	local mins, maxs = info.m_vecMins, info.m_vecMaxs
 	local path = {}
 	local hit = false
+	local timetable = {}
+	local curtime = globals.CurTime()
 
 	while env:GetSimulationTime() < timeEnd do
 		local vStart = projectile:GetPosition()
@@ -107,10 +109,12 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 		end
 
 		path[#path+1] = Vector3(vEnd:Unpack())
+		timetable[#timetable+1] = curtime + env:GetSimulationTime()
 	end
 
 	projectile:Sleep()
-	return path, hit
+	env:ResetSimulationClock()
+	return path, hit, timetable
 end
 
 ---@param target Entity
@@ -120,7 +124,7 @@ end
 ---@param info WeaponInfo
 ---@param time_seconds number
 ---@param localTeam integer
----@return Vector3[], boolean?
+---@return Vector3[], boolean?, number[]
 local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	local angForward = angle:Forward()
 	local tickInterval = globals.TickInterval() * 3.0
@@ -130,8 +134,10 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 
 	local mins, maxs = info.m_vecMins, info.m_vecMaxs
 	local path = {}
+	local timeTable = {}
 	local hit = false
 	local time = 0.0
+	local curtime = globals.CurTime()
 
 	-- Get gravity from info
 	local _, sv_gravity = client.GetConVar("sv_gravity")
@@ -175,6 +181,7 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 
 		-- Add current position to path before checking collision
 		path[#path+1] = Vector3(vEnd:Unpack())
+		timeTable[#timeTable+1] = curtime + time
 
 		if IsIntersectingBB(vEnd, targetPredictedPos, info, target:GetMaxs(), target:GetMins()) then
 			hit = true
@@ -189,7 +196,7 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 		time = time + tickInterval
 	end
 
-	return path, hit
+	return path, hit, timeTable
 end
 
 ---@param target Entity
@@ -200,18 +207,19 @@ end
 ---@param time_seconds number
 ---@param localTeam integer
 ---@param charge number
----@return Vector3[], boolean?
+---@return Vector3[], boolean?, number[]
 local function Run(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
     local projpath = {}
     local hit = nil
+	local timetable = {}
 
 	if info.m_sModelName and info.m_sModelName ~= "" then
-		projpath, hit = SimulateProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
+		projpath, hit, timetable = SimulateProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	else
-		projpath, hit = SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
+		projpath, hit, timetable = SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	end
 
-    return projpath, hit
+    return projpath, hit, timetable
 end
 
 local function OnUnload()

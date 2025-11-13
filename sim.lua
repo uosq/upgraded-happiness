@@ -283,6 +283,7 @@ end
 
 ---@param player Entity
 ---@param time_seconds number
+---@return Vector3[], Vector3, number[]
 local function Run(player, time_seconds)
 	local path = {}
 	local velocity = player:GetPropVector("localdata", "m_vecVelocity[0]") or Vector3()
@@ -290,7 +291,7 @@ local function Run(player, time_seconds)
 
 	if velocity:Length() <= 0.01 then
 		path[1] = origin
-		return path, origin
+		return path, origin, {globals.CurTime()}
 	end
 
 	local maxspeed = player:GetPropFloat("m_flMaxspeed") or 450
@@ -303,6 +304,8 @@ local function Run(player, time_seconds)
 	local _, sv_accelerate = client.GetConVar("sv_accelerate")
 
 	local index = player:GetIndex()
+	local curtime = globals.CurTime()
+	local timetable = {}
 
 	while clock < time_seconds do
 		local is_on_ground = CheckIsOnGround(origin, mins, maxs, index)
@@ -319,17 +322,18 @@ local function Run(player, time_seconds)
 
 		-- Perform collision-aware movement
 		origin = TryPlayerMove(origin, velocity, mins, maxs, index, tickinterval)
-		
+
 		-- If on ground, stick to it
 		if is_on_ground then
 			StayOnGround(origin, mins, maxs, 18, index)
 		end
 
 		path[#path + 1] = Vector3(origin:Unpack())
+		timetable[#timetable+1] = curtime + clock
 		clock = clock + tickinterval
 	end
 
-	return path, path[#path]
+	return path, path[#path], timetable
 end
 
 return Run

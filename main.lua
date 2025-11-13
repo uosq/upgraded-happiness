@@ -26,7 +26,7 @@ utils.weapon = require("utils.weapon_utils")
 ---@field target Entity?
 ---@field angle EulerAngles?
 ---@field path Vector3[]?
----@field storedpath {removetime: number, path: Vector3[]?, projpath: Vector3[]?}
+---@field storedpath {removetime: number, path: Vector3[]?, projpath: Vector3[]?, projtimetable: number[]?, timetable: number[]?}
 ---@field charge number
 ---@field charges boolean
 ----@field accuracy number?
@@ -35,7 +35,7 @@ local state = {
 	angle = nil,
 	path = nil,
 	--accuracy = nil, --- ()
-	storedpath = {removetime = 0.0, path = nil, projpath = nil},
+	storedpath = {removetime = 0.0, path = nil, projpath = nil, projtimetable = nil, timetable = nil},
 	charge = 0,
 	charges = false,
 }
@@ -80,6 +80,30 @@ local function DrawPath(tbl)
 	end
 end
 
+local function CleanTimeTable(pathtbl, timetbl)
+	if not pathtbl or not timetbl or #pathtbl ~= #timetbl or #pathtbl < 2 then
+		return nil, nil
+	end
+
+	local curtime = globals.CurTime()
+	local newpath = {}
+	local newtime = {}
+
+	for i = 1, #timetbl do
+		if timetbl[i] >= curtime then
+			newpath[#newpath+1] = pathtbl[i]
+			newtime[#newtime+1] = timetbl[i]
+		end
+	end
+
+	-- Return nil if we filtered everything out
+	if #newpath == 0 then
+		return nil, nil
+	end
+
+	return newpath, newtime
+end
+
 local function OnDraw()
 	--- Reset our state table
 	state.angle = nil
@@ -98,9 +122,16 @@ local function OnDraw()
 		return
 	end
 
-	if globals.CurTime() >= state.storedpath.removetime then
-		state.storedpath.path = nil
-		state.storedpath.projpath = nil
+	if state.storedpath.path and state.storedpath.timetable then
+		local cleanedpath, cleanedtime = CleanTimeTable(state.storedpath.path, state.storedpath.timetable)
+		state.storedpath.path = cleanedpath
+		state.storedpath.timetable = cleanedtime
+	end
+
+	if state.storedpath.projpath and state.storedpath.projtimetable then
+		local cleanedprojpath, cleanedprojtime = CleanTimeTable(state.storedpath.projpath, state.storedpath.projtimetable)
+		state.storedpath.projpath = cleanedprojpath
+		state.storedpath.projtimetable = cleanedprojtime
 	end
 
 	--- TODO: Use a polygon instead!
@@ -189,7 +220,7 @@ local function OnDraw()
 	--local minAccuracy, maxAccuracy = config.min_accuracy, config.max_accuracy
 	--local maxDistance = config.max_distance
 	--local accuracy = minAccuracy + (maxAccuracy - minAccuracy) * (math.min(distance/maxDistance, 1.0)^1.5)
-	local path, lastPos = SimulatePlayer(bestEnt, time)
+	local path, lastPos, timetable = SimulatePlayer(bestEnt, time)
 
 	local _, sv_gravity = client.GetConVar("sv_gravity")
 	local gravity = sv_gravity * 0.5 * info:GetGravity(charge)
@@ -207,12 +238,11 @@ local function OnDraw()
 	local firePos = info:GetFirePosition(plocal, eyePos, angle, weapon:IsViewModelFlipped())
 	local projpath = {}
 	local hit = nil
-
-	--lastPos = SplashRun(weapon:GetWeaponID(), info, firePos, lastPos, bestEnt:GetMins(), bestEnt:GetMaxs())
+	local projtimetable = {}
 
 	local translatedAngle = utils.math.SolveBallisticArc(firePos, lastPos, speed, gravity)
 	if translatedAngle then
-		projpath, hit = SimulateProj(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
+		projpath, hit, projtimetable = SimulateProj(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
 		if not hit then
 			return
 		end
@@ -223,6 +253,8 @@ local function OnDraw()
 	state.angle = angle
 	state.storedpath.path = path
 	state.storedpath.projpath = projpath
+	state.storedpath.timetable = timetable
+	state.storedpath.projtimetable = projtimetable
 	state.storedpath.removetime = globals.CurTime() + config.path_time
 	state.charge = charge
 	state.charges = info.m_bCharges
