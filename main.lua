@@ -133,8 +133,9 @@ end
 ---@param info WeaponInfo
 ---@param time_seconds number
 ---@param localTeam integer
+---@param charge number
 ---@return Vector3[], boolean?
-local function SimulateProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds)
+local function SimulateProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	local projectile = GetPhysicsProjectile(info)
 	if projectile == nil then
 		return {}
@@ -145,12 +146,12 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 	local angForward = angle:Forward()
 
 	local timeEnd = env:GetSimulationTime() + time_seconds
-	local tickInterval = globals.TickInterval()
+	local tickInterval = globals.TickInterval() * 3.0
 
-	local velocityVector = info:GetVelocity(0)
+	local velocityVector = info:GetVelocity(charge)
 	local startVelocity = (angForward * velocityVector:Length2D()) + (Vector3(0, 0, velocityVector.z))
 	projectile:SetPosition(startPos, angle:Forward(), true)
-	projectile:SetVelocity(startVelocity, info:GetAngularVelocity(0))
+	projectile:SetVelocity(startVelocity, info:GetAngularVelocity(charge))
 
 	local mins, maxs = info.m_vecMins, info.m_vecMaxs
 	local path = {}
@@ -201,11 +202,11 @@ end
 ---@param time_seconds number
 ---@param localTeam integer
 ---@return Vector3[], boolean?
-local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds)
+local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	local angForward = angle:Forward()
-	local tickInterval = globals.TickInterval()
+	local tickInterval = globals.TickInterval() * 3.0
 
-	local velocityVector = info:GetVelocity(0)
+	local velocityVector = info:GetVelocity(charge)
 	local startVelocity = (angForward * velocityVector:Length2D()) + Vector3(0, 0, velocityVector.z)
 
 	local mins, maxs = info.m_vecMins, info.m_vecMaxs
@@ -215,7 +216,7 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 
 	-- Get gravity from info
 	local _, sv_gravity = client.GetConVar("sv_gravity")
-	local gravity = sv_gravity * info:GetGravity(0)
+	local gravity = sv_gravity * info:GetGravity(charge)
 
 	local currentPos = startPos
 	local currentVel = startVelocity
@@ -372,7 +373,7 @@ local function OnDraw()
 		return
 	end
 
-	local charge = info.m_bCharges and weapon:GetChargeBeginTime() or 0.0
+	local charge = info.m_bCharges and weapon:GetCurrentCharge() or 0.0 --weapon:GetChargeBeginTime() or 0.0
 	local speed = info:GetVelocity(charge):Length2D()
 
 	local distance = (localPos - bestEnt:GetAbsOrigin() + (bestEnt:GetMins() + bestEnt:GetMaxs()) * 0.5):Length()
@@ -403,9 +404,9 @@ local function OnDraw()
 	local translatedAngle = utils.math.SolveBallisticArc(firePos, lastPos, speed, gravity)
 	if translatedAngle then
 		if info.m_sModelName and info.m_sModelName ~= "" then
-			projpath, hit = SimulateProjectile(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time)
+			projpath, hit = SimulateProjectile(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
 		else
-			projpath, hit = SimulatePseudoProjectile(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time)
+			projpath, hit = SimulatePseudoProjectile(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
 		end
 	end
 
@@ -433,21 +434,27 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	if state.angle then
-		if state.charges and state.charge <= 0.0 then
-			cmd.buttons = cmd.buttons | IN_ATTACK
-			return
-		end
-
-		if state.charges then
-			cmd.buttons = cmd.buttons & ~IN_ATTACK
-		else
-			cmd.buttons = cmd.buttons | IN_ATTACK
-		end
-
-		cmd.viewangles = Vector3(state.angle:Unpack())
-		cmd.sendpacket = false
+	if not state.angle then
+		return
 	end
+
+	if state.charge > 1.0 then
+		state.charge = 0
+	end
+
+	if state.charges and state.charge < 0.1 then
+		cmd.buttons = cmd.buttons | IN_ATTACK
+		return
+	end
+
+	if state.charges then
+		cmd.buttons = cmd.buttons & ~IN_ATTACK
+	else
+		cmd.buttons = cmd.buttons | IN_ATTACK
+	end
+
+	cmd.sendpacket = false
+	cmd.viewangles = Vector3(state.angle:Unpack())
 end
 
 local function OnUnload()
