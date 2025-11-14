@@ -104,7 +104,7 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 			break
 		end
 
-		if not trace or trace.fraction < 1.0 then
+		if trace.fraction < 1.0 then
 			break
 		end
 
@@ -188,7 +188,7 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 			break
 		end
 
-		if not trace or trace.fraction < 1.0 then
+		if trace.fraction < 1.0 then
 			break
 		end
 

@@ -36,11 +36,4 @@ function wep_utils.CanShoot()
     return nextAttack <= globals.CurTime()
 end
 
----@param val number
----@param min number
----@param max number
-local function clamp(val, min, max)
-    return math.max(min, math.min(val, max))
-end
-
 return wep_utils

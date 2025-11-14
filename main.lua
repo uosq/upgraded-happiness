@@ -29,6 +29,8 @@ utils.weapon = require("utils.weapon_utils")
 ---@field storedpath {removetime: number, path: Vector3[]?, projpath: Vector3[]?, projtimetable: number[]?, timetable: number[]?}
 ---@field charge number
 ---@field charges boolean
+---@field silent boolean
+---@field secondaryfire boolean
 ----@field accuracy number?
 local state = {
 	target = nil,
@@ -38,6 +40,25 @@ local state = {
 	storedpath = {removetime = 0.0, path = nil, projpath = nil, projtimetable = nil, timetable = nil},
 	charge = 0,
 	charges = false,
+	silent = true,
+	secondaryfire = false
+}
+
+local noSilentTbl = {
+	[E_WeaponBaseID.TF_WEAPON_CLEAVER] = true,
+	[E_WeaponBaseID.TF_WEAPON_BAT_WOOD] = true,
+	[E_WeaponBaseID.TF_WEAPON_BAT_GIFTWRAP] = true,
+	[E_WeaponBaseID.TF_WEAPON_LUNCHBOX] = true,
+	[E_WeaponBaseID.TF_WEAPON_JAR] = true,
+	[E_WeaponBaseID.TF_WEAPON_JAR_MILK] = true,
+	[E_WeaponBaseID.TF_WEAPON_JAR_GAS] = true,
+	[E_WeaponBaseID.TF_WEAPON_FLAME_BALL] = true,
+}
+
+local doSecondaryFiretbl = {
+	[E_WeaponBaseID.TF_WEAPON_BAT_GIFTWRAP] = true,
+	[E_WeaponBaseID.TF_WEAPON_LUNCHBOX] = true,
+	[E_WeaponBaseID.TF_WEAPON_BAT_WOOD] = true,
 }
 
 ---@param localPos Vector3
@@ -248,6 +269,10 @@ local function OnDraw()
 		end
 	end
 
+	local weaponID = weapon:GetWeaponID()
+	local secondaryFire = doSecondaryFiretbl[weaponID]
+	local noSilent = noSilentTbl[weaponID]
+
 	state.target = bestEnt
 	state.path = path
 	state.angle = angle
@@ -258,6 +283,8 @@ local function OnDraw()
 	state.storedpath.removetime = globals.CurTime() + config.path_time
 	state.charge = charge
 	state.charges = info.m_bCharges
+	state.secondaryfire = secondaryFire
+	state.silent = not noSilent --- janky ahh stuff
 end
 
 ---@param cmd UserCmd
@@ -286,10 +313,17 @@ local function OnCreateMove(cmd)
 	if state.charges then
 		cmd.buttons = cmd.buttons & ~IN_ATTACK
 	else
-		cmd.buttons = cmd.buttons | IN_ATTACK
+		if state.secondaryfire then
+			cmd.buttons = cmd.buttons | IN_ATTACK2
+		else
+			cmd.buttons = cmd.buttons | IN_ATTACK
+		end
 	end
 
-	cmd.sendpacket = false
+	if state.silent then
+		cmd.sendpacket = false
+	end
+
 	cmd.viewangles = Vector3(state.angle:Unpack())
 end
 
