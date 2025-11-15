@@ -39,7 +39,7 @@ function multipoint.Run(pTarget, pWeapon, weaponInfo, vHeadPos, vecPredictedPos)
     local horizontalDist = (vecPredictedPos - vHeadPos):Length2D()
     local charge = weaponInfo.m_bCharges and pWeapon:GetChargeBeginTime() or globals.CurTime()
 
-    local gravity = 400 * weaponInfo:GetGravity(charge)
+    local gravity = 800 * weaponInfo:GetGravity(charge)
     local projSpeed = weaponInfo:GetVelocity(charge):Length()
     local maxsZ = pTarget:GetMaxs().z
     local t = horizontalDist / projSpeed

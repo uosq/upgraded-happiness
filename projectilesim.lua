@@ -65,7 +65,7 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 	local angForward = angle:Forward()
 
 	local timeEnd = env:GetSimulationTime() + time_seconds
-	local tickInterval = globals.TickInterval() * 3.0
+	local tickInterval = globals.TickInterval()
 
 	local velocityVector = info:GetVelocity(charge)
 	local startVelocity = (angForward * velocityVector:Length2D()) + (Vector3(0, 0, velocityVector.z))
@@ -85,7 +85,7 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 
 		local trace = engine.TraceHull(vStart, vEnd, mins, maxs, info.m_iTraceMask, function (ent, contentsMask)
 			if ent:GetIndex() == target:GetIndex() then
-				return true
+				return false
 			end
 
 			if ent:GetTeamNumber() ~= localTeam and info.m_bStopOnHittingEnemy then
@@ -99,12 +99,13 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 			return false
 		end)
 
-		if IsIntersectingBB(vEnd, targetPredictedPos, info, target:GetMaxs(), target:GetMins()) then
+		--[[if trace.entity:GetIndex() == target:GetIndex() then
 			hit = true
 			break
-		end
+		end]]
 
-		if trace.fraction < 1.0 then
+		if trace.fraction < 1.0 and trace.entity:GetIndex() == target:GetIndex() then
+			hit = true
 			break
 		end
 
@@ -125,9 +126,9 @@ end
 ---@param time_seconds number
 ---@param localTeam integer
 ---@return Vector3[], boolean?, number[]
-local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
+local function SimulateFakeProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	local angForward = angle:Forward()
-	local tickInterval = globals.TickInterval() * 3.0
+	local tickInterval = globals.TickInterval()
 
 	local velocityVector = info:GetVelocity(charge)
 	local startVelocity = (angForward * velocityVector:Length2D()) + Vector3(0, 0, velocityVector.z)
@@ -146,15 +147,17 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 	local currentPos = startPos
 	local currentVel = startVelocity
 
+	local gravity_to_add =  Vector3(0, 0, -gravity * tickInterval)
+
 	while time < time_seconds do
 		local vStart = currentPos
 
 		-- Apply gravity to velocity
-		currentVel = currentVel + Vector3(0, 0, -gravity * tickInterval)
+		currentVel = currentVel + gravity_to_add
 
 		local vEnd = currentPos + currentVel * tickInterval
 
-		local trace = engine.TraceHull(vStart, vEnd, mins, maxs, info.m_iTraceMask or MASK_SHOT_HULL, function (ent, contentsMask)
+		local trace = engine.TraceHull(vStart, vEnd, mins, maxs, info.m_iTraceMask, function (ent, contentsMask)
 			-- Ignore invalid entities
 			if not ent or ent:GetIndex() == 0 then
 				return false
@@ -162,8 +165,7 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 
 			-- Check if we hit our target
 			if ent:GetIndex() == target:GetIndex() then
-				hit = true
-				return true
+				return false
 			end
 
 			-- Check enemy collision
@@ -183,12 +185,13 @@ local function SimulatePseudoProjectile(target, targetPredictedPos, startPos, an
 		path[#path+1] = Vector3(vEnd:Unpack())
 		timeTable[#timeTable+1] = curtime + time
 
-		if IsIntersectingBB(vEnd, targetPredictedPos, info, target:GetMaxs(), target:GetMins()) then
+		--[[if trace.entity:GetIndex() == target:GetIndex() then
 			hit = true
 			break
-		end
+		end]]
 
-		if trace.fraction < 1.0 then
+		if trace.fraction < 1.0 and trace.entity:GetIndex() == target:GetIndex() then
+			hit = true
 			break
 		end
 
@@ -216,7 +219,7 @@ local function Run(target, targetPredictedPos, startPos, angle, info, localTeam,
 	if info.m_sModelName and info.m_sModelName ~= "" then
 		projpath, hit, timetable = SimulateProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	else
-		projpath, hit, timetable = SimulatePseudoProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
+		projpath, hit, timetable = SimulateFakeProjectile(target, targetPredictedPos, startPos, angle, info, localTeam, time_seconds, charge)
 	end
 
     return projpath, hit, timetable

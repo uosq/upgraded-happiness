@@ -8,14 +8,14 @@ local config = {
 	aim_dispenser = true,
 	aim_teleporter = true,
 	max_distance = 3000,
-	min_accuracy = 5,
-	max_accuracy = 15,
-	path_time = 2.0,
+	min_accuracy = 2,
+	max_accuracy = 12,
+	min_confidence = 40, --- %
 }
 
 --local SimulatePlayer = require("playersim")
 local GetProjectileInfo = require("projectile_info")
-local SimulatePlayer = require("sim")
+local SimulatePlayer = require("playersim")
 local SimulateProj = require("projectilesim")
 
 local utils = {}
@@ -26,7 +26,7 @@ utils.weapon = require("utils.weapon_utils")
 ---@field target Entity?
 ---@field angle EulerAngles?
 ---@field path Vector3[]?
----@field storedpath {removetime: number, path: Vector3[]?, projpath: Vector3[]?, projtimetable: number[]?, timetable: number[]?}
+---@field storedpath {path: Vector3[]?, projpath: Vector3[]?, projtimetable: number[]?, timetable: number[]?}
 ---@field charge number
 ---@field charges boolean
 ---@field silent boolean
@@ -36,8 +36,7 @@ local state = {
 	target = nil,
 	angle = nil,
 	path = nil,
-	--accuracy = nil, --- ()
-	storedpath = {removetime = 0.0, path = nil, projpath = nil, projtimetable = nil, timetable = nil},
+	storedpath = {path = nil, projpath = nil, projtimetable = nil, timetable = nil},
 	charge = 0,
 	charges = false,
 	silent = true,
@@ -60,6 +59,8 @@ local doSecondaryFiretbl = {
 	[E_WeaponBaseID.TF_WEAPON_LUNCHBOX] = true,
 	[E_WeaponBaseID.TF_WEAPON_BAT_WOOD] = true,
 }
+
+local font = draw.CreateFont("Arial", 12, 0)
 
 ---@param localPos Vector3
 ---@param className string
@@ -125,6 +126,108 @@ local function CleanTimeTable(pathtbl, timetbl)
 	return newpath, newtime
 end
 
+---@param entity Entity The target entity
+---@param projpath Vector3[]? The predicted projectile path
+---@param hit boolean? Whether projectile simulation hit the target
+---@param distance number Distance to target
+---@param speed number Projectile speed
+---@param gravity number Gravity modifier
+---@param time number Prediction time
+---@return number score Hitchance score from 0-100%
+local function CalculateHitchance(entity, projpath, hit, distance, speed, gravity, time)
+    local score = 100.0
+
+    --- distance penalty (0-40% reduction based on distance)
+    local maxDistance = config.max_distance or 3000
+    local distanceFactor = math.min(distance / maxDistance, 1.0)
+    score = score - (distanceFactor * 40)
+
+    --- prediction time penalty (longer predictions = less accurate)
+    if time > 2.0 then
+        score = score - ((time - 2.0) * 15)
+    elseif time > 1.0 then
+        score = score - ((time - 1.0) * 10)
+    end
+
+    --- projectile simulation penalties
+    if projpath then
+        --- if hit something, penalize the shit out of it
+        if hit then
+            score = score - 30
+        end
+
+        --- penalty for very long projectile paths (more chance for error)
+        if #projpath > 50 then
+            score = score - 10
+        elseif #projpath > 100 then
+            score = score - 20
+        end
+    else
+        --- i dont remember if i ever return nil for projpath
+		--- but fuck it we ball
+        score = score - 25
+    end
+
+    --- gravity penalty (high arc = less accurate (kill me))
+    if gravity > 0 then
+		--- using 400 or 800 gravity is such a pain
+		--- i dont remember anymore why i chose 400 here
+		--- but its working fine as far as i know
+		--- unless im using 800 graviy
+		--- then this is probably giving a shit ton of score
+		--- but im so confused and sleep deprived that i dont care
+        local gravityFactor = math.min(gravity/400, 1.0)
+        score = score - (gravityFactor * 15)
+    end
+
+    --- targed speed penalty
+	--- more speed = less confiident we are
+    local velocity = entity:EstimateAbsVelocity() or Vector3()
+    if velocity then
+        local speed2d = velocity:Length2D()
+        if speed2d > 300 then
+            score = score - 15
+        elseif speed2d > 200 then
+            score = score - 10
+        elseif speed2d > 100 then
+            score = score - 5
+        end
+    end
+
+    --- target class bonus/penalty
+    if entity:IsPlayer() then
+        local class = entity:GetPropInt("m_iClass")
+        --- scouts are harder to hit
+        if class == E_Character.TF2_Scout then -- Scout
+            score = score - 10
+        end
+
+        --- classes easier to hit
+        if class == E_Character.TF2_Heavy or class == E_Character.TF2_Sniper then -- Heavy or Sniper
+            score = score + 5
+        end
+
+        --- penalize air targets
+		--- i wrote this shit at 3 am, wtf is this?
+        if entity:InCond(E_TFCOND.TFCond_BlastJumping) then
+            score = score - 15
+        end
+    else
+        --- buildings dont have feet (at least the ones i know)
+        score = score + 15
+    end
+
+    --- projectile speed penalty (slow projectiles are harder to hit)
+    if speed < 1000 then
+        score = score - 10
+    elseif speed < 1500 then
+        score = score - 5
+    end
+
+    --- clamp this
+    return math.max(0, math.min(100, score))
+end
+
 local function OnDraw()
 	--- Reset our state table
 	state.angle = nil
@@ -165,6 +268,10 @@ local function OnDraw()
 	if storedprojpath then
 		DrawPath(storedprojpath)
 	end
+
+	draw.Color(255, 255, 255 ,255)
+	draw.SetFont(font)
+	draw.TextShadow(10, 10, string.format("Confidence: %f", state.confidence or 0))
 
 	if input.IsButtonDown(config.key) == false then
 		return
@@ -215,15 +322,64 @@ local function OnDraw()
 	local eyePos = localPos + plocal:GetPropVector("localdata", "m_vecViewOffset[0]")
 	local viewangle = engine.GetViewAngles()
 
-	local angle, bestFov, bestEnt = nil, config.fov, nil
+	local charge = info.m_bCharges and weapon:GetCurrentCharge() or 0.0
+	local speed = info:GetVelocity(charge):Length2D()
+	local _, sv_gravity = client.GetConVar("sv_gravity")
+	local gravity = sv_gravity * 0.5 * info:GetGravity(charge)
+	local weaponID = weapon:GetWeaponID()
+
+	-- Predict all entities and find the best one
+	local bestFov = config.fov
+	local bestEnt = nil
+	local bestAngle = nil
+	local bestPath = nil
+	local bestTimeTable = nil
+	local bestProjPath = nil
+	local bestProjTimeTable = nil
+	local bestConfidence = 0
+
+	local minAccuracy, maxAccuracy = config.min_accuracy, config.max_accuracy
+	local maxDistance = config.max_distance
+
 	for _, entity in ipairs(entitylist) do
-		local center = entity:GetAbsOrigin() + (entity:GetMins() + entity:GetMaxs()) * 0.5
-		angle = utils.math.PositionAngles(eyePos, center)
+		local distance = (localPos - entity:GetAbsOrigin() + (entity:GetMins() + entity:GetMaxs()) * 0.5):Length()
+		local time = (distance/speed) + (netchannel:GetLatency(E_Flows.FLOW_INCOMING) + netchannel:GetLatency(E_Flows.FLOW_OUTGOING))
+		local lazyness = minAccuracy + (maxAccuracy - minAccuracy) * (math.min(distance/maxDistance, 1.0)^1.5)
+
+		local path, lastPos, timetable = SimulatePlayer(entity, time, lazyness)
+
+		local _, multipointPos = multipoint.Run(entity, weapon, info, eyePos, lastPos)
+		if multipointPos then
+			lastPos = multipointPos
+		end
+
+		local angle = utils.math.SolveBallisticArc(eyePos, lastPos, speed, gravity)
 		if angle then
-			local fov = utils.math.AngleFov(viewangle, angle)
-			if fov < bestFov then
-				bestFov = fov
-				bestEnt = entity
+
+			-- Check visibility
+			local firePos = info:GetFirePosition(plocal, eyePos, angle, weapon:IsViewModelFlipped())
+			local translatedAngle = utils.math.SolveBallisticArc(firePos, lastPos, speed, gravity)
+
+			if translatedAngle then
+				local projpath, hit, projtimetable = SimulateProj(entity, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
+
+				--- only choose him if the projecile's trajectory wasn't obstructed (hitted? man english is hard :sob:)
+				if not hit then
+					local fov = utils.math.AngleFov(viewangle, angle)
+					if fov < bestFov then
+						local confidence = CalculateHitchance(entity, projpath, hit, distance, speed, gravity, time)
+						if confidence > bestConfidence then
+							bestFov = fov
+							bestEnt = entity
+							bestAngle = angle
+							bestPath = path
+							bestTimeTable = timetable
+							bestProjPath = projpath
+							bestProjTimeTable = projtimetable
+							bestConfidence = confidence
+						end
+					end
+				end
 			end
 		end
 	end
@@ -232,59 +388,21 @@ local function OnDraw()
 		return
 	end
 
-	local charge = info.m_bCharges and weapon:GetCurrentCharge() or 0.0 --weapon:GetChargeBeginTime() or 0.0
-	local speed = info:GetVelocity(charge):Length2D()
-
-	local distance = (localPos - bestEnt:GetAbsOrigin() + (bestEnt:GetMins() + bestEnt:GetMaxs()) * 0.5):Length()
-	local time = (distance/speed) + (netchannel:GetLatency(E_Flows.FLOW_INCOMING) + netchannel:GetLatency(E_Flows.FLOW_OUTGOING))
-
-	--local minAccuracy, maxAccuracy = config.min_accuracy, config.max_accuracy
-	--local maxDistance = config.max_distance
-	--local accuracy = minAccuracy + (maxAccuracy - minAccuracy) * (math.min(distance/maxDistance, 1.0)^1.5)
-	local path, lastPos, timetable = SimulatePlayer(bestEnt, time)
-
-	local _, sv_gravity = client.GetConVar("sv_gravity")
-	local gravity = sv_gravity * 0.5 * info:GetGravity(charge)
-
-	local _, multipointPos = multipoint.Run(bestEnt, weapon, info, eyePos, lastPos)
-	if multipointPos then
-		lastPos = multipointPos
-	end
-
-	angle = utils.math.SolveBallisticArc(eyePos, lastPos, speed, gravity)
-	if angle == nil then
-		return
-	end
-
-	local firePos = info:GetFirePosition(plocal, eyePos, angle, weapon:IsViewModelFlipped())
-	local projpath = {}
-	local hit = nil
-	local projtimetable = {}
-
-	local translatedAngle = utils.math.SolveBallisticArc(firePos, lastPos, speed, gravity)
-	if translatedAngle then
-		projpath, hit, projtimetable = SimulateProj(bestEnt, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
-		if not hit then
-			return
-		end
-	end
-
-	local weaponID = weapon:GetWeaponID()
 	local secondaryFire = doSecondaryFiretbl[weaponID]
 	local noSilent = noSilentTbl[weaponID]
 
 	state.target = bestEnt
-	state.path = path
-	state.angle = angle
-	state.storedpath.path = path
-	state.storedpath.projpath = projpath
-	state.storedpath.timetable = timetable
-	state.storedpath.projtimetable = projtimetable
-	state.storedpath.removetime = globals.CurTime() + config.path_time
+	state.path = bestPath
+	state.angle = bestAngle
+	state.storedpath.path = bestPath
+	state.storedpath.projpath = bestProjPath
+	state.storedpath.timetable = bestTimeTable
+	state.storedpath.projtimetable = bestProjTimeTable
 	state.charge = charge
 	state.charges = info.m_bCharges
 	state.secondaryfire = secondaryFire
 	state.silent = not noSilent --- janky ahh stuff
+	state.confidence = bestConfidence
 end
 
 ---@param cmd UserCmd
@@ -305,7 +423,7 @@ local function OnCreateMove(cmd)
 		state.charge = 0
 	end
 
-	if state.charges and state.charge < 0.05 then
+	if state.charges and state.charge < 0.1 then
 		cmd.buttons = cmd.buttons | IN_ATTACK
 		return
 	end
