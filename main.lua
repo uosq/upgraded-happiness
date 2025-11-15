@@ -137,7 +137,6 @@ end
 local function CalculateHitchance(entity, projpath, hit, distance, speed, gravity, time)
     local score = 100.0
 
-    --- distance penalty (0-40% reduction based on distance)
     local maxDistance = config.max_distance or 3000
     local distanceFactor = math.min(distance / maxDistance, 1.0)
     score = score - (distanceFactor * 40)
@@ -152,8 +151,8 @@ local function CalculateHitchance(entity, projpath, hit, distance, speed, gravit
     --- projectile simulation penalties
     if projpath then
         --- if hit something, penalize the shit out of it
-        if hit then
-            score = score - 30
+        if not hit then
+            score = score - 100
         end
 
         --- penalty for very long projectile paths (more chance for error)
@@ -165,7 +164,7 @@ local function CalculateHitchance(entity, projpath, hit, distance, speed, gravit
     else
         --- i dont remember if i ever return nil for projpath
 		--- but fuck it we ball
-        score = score - 25
+        score = score - 100
     end
 
     --- gravity penalty (high arc = less accurate (kill me))
@@ -336,7 +335,7 @@ local function OnDraw()
 	local bestTimeTable = nil
 	local bestProjPath = nil
 	local bestProjTimeTable = nil
-	local bestConfidence = 0
+	local bestConfidence = config.min_confidence
 
 	local minAccuracy, maxAccuracy = config.min_accuracy, config.max_accuracy
 	local maxDistance = config.max_distance
@@ -364,7 +363,7 @@ local function OnDraw()
 				local projpath, hit, projtimetable = SimulateProj(entity, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
 
 				--- only choose him if the projecile's trajectory wasn't obstructed (hitted? man english is hard :sob:)
-				if not hit then
+				if hit then
 					local fov = utils.math.AngleFov(viewangle, angle)
 					if fov < bestFov then
 						local confidence = CalculateHitchance(entity, projpath, hit, distance, speed, gravity, time)

@@ -45,6 +45,28 @@ local function IsIntersectingBB(currentPos, vecTargetPredictedPos, weaponInfo, v
     return true -- all axis overlap
 end
 
+local function TraceProjectileHull(vStart, vEnd, mins, maxs, info, target, localTeam, currentTime)
+    return engine.TraceHull(vStart, vEnd, mins, maxs, info.m_iTraceMask, function(ent)
+        if ent:GetIndex() == target:GetIndex() then
+            return true
+        end
+
+        local team = ent:GetTeamNumber()
+
+        --- teammates are ignored until delay expires
+        if team == localTeam then
+			return currentTime > info.m_flCollideWithTeammatesDelay
+        end
+
+        if team ~= localTeam then
+			return info.m_bStopOnHittingEnemy
+        end
+
+        return true
+    end)
+end
+
+
 ---@param target Entity
 ---@param targetPredictedPos Vector3
 ---@param startPos Vector3
@@ -83,29 +105,18 @@ local function SimulateProjectile(target, targetPredictedPos, startPos, angle, i
 		env:Simulate(tickInterval)
 		local vEnd = projectile:GetPosition()
 
-		local trace = engine.TraceHull(vStart, vEnd, mins, maxs, info.m_iTraceMask, function (ent, contentsMask)
-			if ent:GetIndex() == target:GetIndex() then
-				return false
-			end
+		local trace = TraceProjectileHull(vStart, vEnd, mins, maxs, info, target, localTeam, env:GetSimulationTime())
 
-			if ent:GetTeamNumber() ~= localTeam and info.m_bStopOnHittingEnemy then
-				return true
-			end
-
-			if ent:GetTeamNumber() == localTeam and env:GetSimulationTime() > info.m_flCollideWithTeammatesDelay then
-				return true
-			end
-
-			return false
-		end)
-
-		--[[if trace.entity:GetIndex() == target:GetIndex() then
+		if IsIntersectingBB(vEnd, targetPredictedPos, info, target:GetMaxs(), target:GetMins()) then
 			hit = true
 			break
-		end]]
+		end
 
-		if trace.fraction < 1.0 and trace.entity:GetIndex() == target:GetIndex() then
-			hit = true
+		if trace.fraction < 1.0 then
+			--[[if trace.entity and trace.entity:GetIndex() == target:GetIndex() then
+				hit = true
+			end]]
+
 			break
 		end
 
@@ -157,42 +168,23 @@ local function SimulateFakeProjectile(target, targetPredictedPos, startPos, angl
 
 		local vEnd = currentPos + currentVel * tickInterval
 
-		local trace = engine.TraceHull(vStart, vEnd, mins, maxs, info.m_iTraceMask, function (ent, contentsMask)
-			-- Ignore invalid entities
-			if not ent or ent:GetIndex() == 0 then
-				return false
-			end
-
-			-- Check if we hit our target
-			if ent:GetIndex() == target:GetIndex() then
-				return false
-			end
-
-			-- Check enemy collision
-			if ent:GetTeamNumber() ~= localTeam and info.m_bStopOnHittingEnemy then
-				return true
-			end
-
-			-- Check teammate collision after delay
-			if ent:GetTeamNumber() == localTeam and time > info.m_flCollideWithTeammatesDelay then
-				return true
-			end
-
-			return false
-		end)
+		local trace = TraceProjectileHull(vStart, vEnd, mins, maxs, info, target, localTeam, time)
 
 		-- Add current position to path before checking collision
 		path[#path+1] = Vector3(vEnd:Unpack())
 		timeTable[#timeTable+1] = curtime + time
 
-		--[[if trace.entity:GetIndex() == target:GetIndex() then
+		if IsIntersectingBB(vEnd, targetPredictedPos, info, target:GetMaxs(), target:GetMins()) then
 			hit = true
 			break
-		end]]
+		end
 
-		if trace.fraction < 1.0 and trace.entity:GetIndex() == target:GetIndex() then
-			hit = true
-			break
+		if trace.fraction < 1.0 then
+			--[[if trace.entity and trace.entity:GetIndex() == target:GetIndex() then
+				hit = true
+			end]]
+
+    		break
 		end
 
 		currentPos = vEnd
