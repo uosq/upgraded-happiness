@@ -33,7 +33,7 @@ function wep_utils.CanShoot()
     end
 
     old_weapon = weapon
-    return nextAttack <= globals.CurTime()
+    return nextAttack < globals.CurTime()
 end
 
 return wep_utils

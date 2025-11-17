@@ -1,17 +1,10 @@
 local multipoint = require "multipoint"
 --- made by navet
 
-local config = {
-	fov = 30.0,
-	key = E_ButtonCode.KEY_LSHIFT,
-	aim_sentry = true,
-	aim_dispenser = true,
-	aim_teleporter = true,
-	max_distance = 3000,
-	min_accuracy = 2,
-	max_accuracy = 12,
-	min_confidence = 40, --- %
-}
+local MAX_DISTANCE = 3000
+local MIN_ACCURACY = 2
+local MAX_ACCURACY = 12
+local MIN_CONFIDENCE = 40 --- 40%
 
 --local SimulatePlayer = require("playersim")
 local GetProjectileInfo = require("projectile_info")
@@ -60,8 +53,6 @@ local doSecondaryFiretbl = {
 	[E_WeaponBaseID.TF_WEAPON_BAT_WOOD] = true,
 }
 
-local font = draw.CreateFont("Arial", 12, 0)
-
 ---@param localPos Vector3
 ---@param className string
 ---@param enemyTeam integer
@@ -76,7 +67,7 @@ local function ProcessClass(localPos, className, enemyTeam, outTable)
 		and not entity:IsDormant()
 		and entity:GetTeamNumber() == enemyTeam
 		and not entity:InCond(E_TFCOND.TFCond_Cloaked)
-		and (localPos - entity:GetAbsOrigin()):Length() <= config.max_distance then
+		and (localPos - entity:GetAbsOrigin()):Length() <= MAX_DISTANCE then
 			--print(string.format("Is alive: %s, Health: %d", entity:IsAlive(), entity:GetHealth()))
 			outTable[#outTable+1] = entity
 		end
@@ -137,7 +128,7 @@ end
 local function CalculateHitchance(entity, projpath, hit, distance, speed, gravity, time)
     local score = 100.0
 
-    local maxDistance = config.max_distance or 3000
+    local maxDistance = MAX_DISTANCE
     local distanceFactor = math.min(distance / maxDistance, 1.0)
     score = score - (distanceFactor * 40)
 
@@ -152,7 +143,7 @@ local function CalculateHitchance(entity, projpath, hit, distance, speed, gravit
     if projpath then
         --- if hit something, penalize the shit out of it
         if not hit then
-            score = score - 100
+            score = score - 40
         end
 
         --- penalty for very long projectile paths (more chance for error)
@@ -223,8 +214,26 @@ local function CalculateHitchance(entity, projpath, hit, distance, speed, gravit
         score = score - 5
     end
 
+	print(score)
     --- clamp this
     return math.max(0, math.min(100, score))
+end
+
+--- vector.Normalize doesn't work
+--- so we do it ourselves
+--- Normalizes In Place and returns length
+---@param vec Vector3
+local function Normalize(vec)
+	local len = vec:Length()
+	if (len < 0.0001) then
+		return 0
+	end
+
+	vec.x = vec.x / len
+	vec.y = vec.y / len
+	vec.z = vec.z / len
+
+	return len
 end
 
 local function OnDraw()
@@ -268,11 +277,7 @@ local function OnDraw()
 		DrawPath(storedprojpath)
 	end
 
-	draw.Color(255, 255, 255 ,255)
-	draw.SetFont(font)
-	draw.TextShadow(10, 10, string.format("Confidence: %f", state.confidence or 0))
-
-	if input.IsButtonDown(config.key) == false then
+	if input.IsButtonDown(gui.GetValue("aim key")) == false then
 		return
 	end
 
@@ -302,15 +307,12 @@ local function OnDraw()
 	local entitylist = {}
 	ProcessClass(localPos, "CTFPlayer", enemyTeam, entitylist)
 
-	if config.aim_sentry then
+	if gui.GetValue("aim sentry") == 1 then
 		ProcessClass(localPos, "CObjectSentrygun", enemyTeam, entitylist)
 	end
 
-	if config.aim_dispenser then
+	if gui.GetValue("aim other buildings") then
 		ProcessClass(localPos, "CObjectDispenser", enemyTeam, entitylist)
-	end
-
-	if config.aim_teleporter then
 		ProcessClass(localPos, "CObjectTeleporter", enemyTeam, entitylist)
 	end
 
@@ -327,23 +329,36 @@ local function OnDraw()
 	local gravity = sv_gravity * 0.5 * info:GetGravity(charge)
 	local weaponID = weapon:GetWeaponID()
 
-	-- Predict all entities and find the best one
-	local bestFov = config.fov
-	local bestEnt = nil
-	local bestAngle = nil
-	local bestPath = nil
-	local bestTimeTable = nil
-	local bestProjPath = nil
-	local bestProjTimeTable = nil
-	local bestConfidence = config.min_confidence
-
-	local minAccuracy, maxAccuracy = config.min_accuracy, config.max_accuracy
-	local maxDistance = config.max_distance
-
+	local sortedEntities = {}
 	for _, entity in ipairs(entitylist) do
+		local entityCenter = entity:GetAbsOrigin() + (entity:GetMins() + entity:GetMaxs()) * 0.5
+		local dirToEntity = (entityCenter - eyePos)
+		Normalize(dirToEntity)
+		local forward = viewangle:Forward()
+		local angle = math.acos(forward:Dot(dirToEntity)) * (180 / math.pi) --- i love dot products
+
+		if angle <= gui.GetValue("aim fov") then
+			table.insert(sortedEntities, {
+				entity = entity,
+				fov = angle
+			})
+		end
+	end
+
+	--- sort by fov (lowest to highest)
+	table.sort(sortedEntities, function(a, b)
+		return a.fov < b.fov
+	end)
+
+	if #sortedEntities == 0 then
+		return
+	end
+
+	for _, entData in ipairs(sortedEntities) do
+		local entity = entData.entity
 		local distance = (localPos - entity:GetAbsOrigin() + (entity:GetMins() + entity:GetMaxs()) * 0.5):Length()
-		local time = (distance/speed) + (netchannel:GetLatency(E_Flows.FLOW_INCOMING) + netchannel:GetLatency(E_Flows.FLOW_OUTGOING))
-		local lazyness = minAccuracy + (maxAccuracy - minAccuracy) * (math.min(distance/maxDistance, 1.0)^1.5)
+		local time = (distance/speed) + netchannel:GetLatency(E_Flows.FLOW_INCOMING)
+		local lazyness = MIN_ACCURACY + (MAX_ACCURACY - MIN_ACCURACY) * (math.min(distance/MAX_DISTANCE, 1.0)^1.5)
 
 		local path, lastPos, timetable = SimulatePlayer(entity, time, lazyness)
 
@@ -354,54 +369,40 @@ local function OnDraw()
 
 		local angle = utils.math.SolveBallisticArc(eyePos, lastPos, speed, gravity)
 		if angle then
-
-			-- Check visibility
+			--- check visibility
 			local firePos = info:GetFirePosition(plocal, eyePos, angle, weapon:IsViewModelFlipped())
 			local translatedAngle = utils.math.SolveBallisticArc(firePos, lastPos, speed, gravity)
 
 			if translatedAngle then
-				local projpath, hit, projtimetable = SimulateProj(entity, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
+				local projpath, hit, fullSim, projtimetable = SimulateProj(entity, lastPos, firePos, translatedAngle, info, plocal:GetTeamNumber(), time, charge)
 
-				--- only choose him if the projecile's trajectory wasn't obstructed (hitted? man english is hard :sob:)
-				if hit then
-					local fov = utils.math.AngleFov(viewangle, angle)
-					if fov < bestFov then
-						local confidence = CalculateHitchance(entity, projpath, hit, distance, speed, gravity, time)
-						if confidence > bestConfidence then
-							bestFov = fov
-							bestEnt = entity
-							bestAngle = angle
-							bestPath = path
-							bestTimeTable = timetable
-							bestProjPath = projpath
-							bestProjTimeTable = projtimetable
-							bestConfidence = confidence
-						end
+				--if hit then
+				if fullSim then
+					local confidence = CalculateHitchance(entity, projpath, fullSim, distance, speed, gravity, time)
+					if confidence >= MIN_CONFIDENCE then
+						local secondaryFire = doSecondaryFiretbl[weaponID]
+						local noSilent = noSilentTbl[weaponID]
+
+						state.target = entity
+						state.path = path
+						state.angle = angle
+						state.storedpath.path = path
+						state.storedpath.projpath = projpath
+						state.storedpath.timetable = timetable
+						state.storedpath.projtimetable = projtimetable
+						state.charge = charge
+						state.charges = info.m_bCharges
+						state.secondaryfire = secondaryFire
+						state.silent = not noSilent
+						state.confidence = confidence
+						return
 					end
 				end
 			end
 		end
 	end
 
-	if bestEnt == nil then
-		return
-	end
-
-	local secondaryFire = doSecondaryFiretbl[weaponID]
-	local noSilent = noSilentTbl[weaponID]
-
-	state.target = bestEnt
-	state.path = bestPath
-	state.angle = bestAngle
-	state.storedpath.path = bestPath
-	state.storedpath.projpath = bestProjPath
-	state.storedpath.timetable = bestTimeTable
-	state.storedpath.projtimetable = bestProjTimeTable
-	state.charge = charge
-	state.charges = info.m_bCharges
-	state.secondaryfire = secondaryFire
-	state.silent = not noSilent --- janky ahh stuff
-	state.confidence = bestConfidence
+	--- no valid target found :sob:
 end
 
 ---@param cmd UserCmd
@@ -410,7 +411,7 @@ local function OnCreateMove(cmd)
 		return
 	end
 
-	if input.IsButtonDown(config.key) == false then
+	if input.IsButtonDown(gui.GetValue("aim key")) == false then
 		return
 	end
 

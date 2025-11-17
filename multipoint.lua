@@ -43,7 +43,7 @@ function multipoint.Run(pTarget, pWeapon, weaponInfo, vHeadPos, vecPredictedPos)
     local projSpeed = weaponInfo:GetVelocity(charge):Length()
     local maxsZ = pTarget:GetMaxs().z
     local t = horizontalDist / projSpeed
-    local drop = 0.5 * gravity * t * t
+    local drop = gravity * t * t
 
     for i = 1, #chosen_offsets do
         local offset = chosen_offsets[i]
