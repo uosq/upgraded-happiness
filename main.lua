@@ -361,8 +361,9 @@ local function OnDraw()
 		local lazyness = MIN_ACCURACY + (MAX_ACCURACY - MIN_ACCURACY) * (math.min(distance/MAX_DISTANCE, 1.0)^1.5)
 
 		local path, lastPos, timetable = SimulatePlayer(entity, time, lazyness)
+		local drop = gravity * time * time
 
-		local _, multipointPos = multipoint.Run(entity, weapon, info, eyePos, lastPos)
+		local _, multipointPos = multipoint.Run(entity, weapon, info, eyePos, lastPos, drop)
 		if multipointPos then
 			lastPos = multipointPos
 		end

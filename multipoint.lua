@@ -8,13 +8,17 @@ local huntsman_z_offsets = { 0.9, 0.7, 0.5, 0.4, 0.2 }
 
 local splash_offsets = { 0.2, 0.4, 0.5, 0.7, 0.9 }
 
+local SimulateProj = require("projectilesim")
+local mathlib = require("utils.math")
+
 ---@param vHeadPos Vector3
 ---@param pTarget Entity
 ---@param vecPredictedPos Vector3
 ---@param pWeapon Entity
 ---@param weaponInfo WeaponInfo
+---@param drop number
 ---@return boolean, Vector3?  -- visible, final predicted hit position (or nil)
-function multipoint.Run(pTarget, pWeapon, weaponInfo, vHeadPos, vecPredictedPos)
+function multipoint.Run(pTarget, pWeapon, weaponInfo, vHeadPos, vecPredictedPos, drop)
     local proj_type = pWeapon:GetWeaponProjectileType()
     local bExplosive = weaponInfo.m_flDamageRadius > 0 and
         proj_type == E_ProjectileType.TF_PROJECTILE_ROCKET or
@@ -36,14 +40,7 @@ function multipoint.Run(pTarget, pWeapon, weaponInfo, vHeadPos, vecPredictedPos)
     local chosen_offsets = bHuntsman and huntsman_z_offsets or (bSplashWeapon or bExplosive) and splash_offsets or z_offsets
 
     local trace = nil
-    local horizontalDist = (vecPredictedPos - vHeadPos):Length2D()
-    local charge = weaponInfo.m_bCharges and pWeapon:GetChargeBeginTime() or globals.CurTime()
-
-    local gravity = 800 * weaponInfo:GetGravity(charge)
-    local projSpeed = weaponInfo:GetVelocity(charge):Length()
     local maxsZ = pTarget:GetMaxs().z
-    local t = horizontalDist / projSpeed
-    local drop = gravity * t * t
 
     for i = 1, #chosen_offsets do
         local offset = chosen_offsets[i]
@@ -57,7 +54,7 @@ function multipoint.Run(pTarget, pWeapon, weaponInfo, vHeadPos, vecPredictedPos)
                 return false
             end)
 
-        if trace and trace.fraction >= 1 then
+        if trace and trace.fraction == 1 then
             -- build a new Vector3 for the visible hit point
             local finalPos = Vector3(vecPredictedPos:Unpack())
             finalPos.z = origin.z
